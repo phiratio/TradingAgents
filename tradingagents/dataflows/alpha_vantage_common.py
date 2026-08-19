@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from datetime import datetime
 from io import StringIO
@@ -146,6 +147,10 @@ def _filter_csv_by_date_range(csv_data: str, start_date: str, end_date: str) -> 
         return filtered_df.to_csv(index=False)
 
     except Exception as e:
-        # If filtering fails, return original data with a warning
-        print(f"Warning: Failed to filter CSV data by date range: {e}")
+        # If filtering fails, return original data with a warning. Logged (to
+        # stderr) rather than printed: stdout is the data channel in the CLI
+        # architecture, and a stray warning would corrupt the price payload.
+        logging.getLogger(__name__).warning(
+            "Failed to filter CSV data by date range: %s", e
+        )
         return csv_data

@@ -61,16 +61,3 @@ class TestVerifiedSnapshot:
         # last-N closes table has at most 30 data rows
         close_rows = [ln for ln in snap.splitlines() if ln.startswith("| 2026-")]
         assert 0 < len(close_rows) <= 30
-
-
-@pytest.mark.unit
-class TestTool:
-    def test_tool_delegates_to_builder(self, monkeypatch):
-        from tradingagents.agents.utils.market_data_validation_tools import (
-            get_verified_market_snapshot,
-        )
-        monkeypatch.setattr(validator, "load_ohlcv", lambda s, d: _sample_ohlcv())
-        out = get_verified_market_snapshot.invoke(
-            {"symbol": "COF", "curr_date": "2026-05-20"}
-        )
-        assert "Verified market data snapshot for COF" in out

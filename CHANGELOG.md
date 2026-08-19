@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [0.4.0] — 2026-08-19
+
+**Full rewrite: TradingAgents now runs natively on Claude Code.** The reasoning
+layer no longer calls LLM provider APIs — Claude Code subagents play every agent
+role, orchestrated by the `/tradingagents` skill. No LLM API keys are required.
+
+### Added
+
+- `/tradingagents` skill (`.claude/skills/tradingagents/SKILL.md`) — the full
+  pipeline orchestration: parallel analysts, bull/bear research debate,
+  trader proposal, risk debate, and the Portfolio Manager's final 5-tier
+  rating, with the same phase order, debate arithmetic (2×debate rounds,
+  3×risk rounds), and output contracts as the LangGraph edition.
+- Twelve subagent role definitions in `.claude/agents/tradingagents-*.md`,
+  faithfully ported from the LangGraph agent prompts (indicator catalog,
+  verified-snapshot anti-hallucination contract, sentiment banding, rating
+  scales, `FINAL TRANSACTION PROPOSAL` marker, …).
+- `tradingagents/data_cli.py` (`python -m tradingagents.data_cli`, console
+  script `tradingagents-data`) — the keyless market-data backend agents shell
+  out to: `stock-data`, `indicators`, `snapshot`, `fundamentals`,
+  `balance-sheet`/`cashflow`/`income-statement`, `news`, `global-news`,
+  `insider-transactions`, `macro`, `prediction-markets`, `social` (sentiment
+  bundle), `identity`, `config`, `report`, and `memory
+  context|store|pending|resolve`.
+- `TRADINGAGENTS_VENDOR_<CATEGORY>` env vars for per-category vendor selection
+  (the old config-dict-only mechanism was unreachable from a one-process-per-
+  call CLI).
+- `tradingagents/outcomes.py` — realized-return and benchmark resolution
+  (ported unchanged from `TradingAgentsGraph`); `tradingagents/memory.py` and
+  `tradingagents/rating.py` (moved from `agents/utils/`, formats unchanged —
+  existing `trading_memory.md` logs keep working).
+- `tradingagents/dataflows/identity.py` — instrument identity resolution and
+  crypto detection, rehomed from the deleted `agents`/`cli` packages.
+- `CLAUDE.md` and `.claude/settings.json` (pre-approved permissions for the
+  data CLI) so a fresh clone works in Claude Code out of the box.
+
+### Removed
+
+- `tradingagents/llm_clients/` (all 15 provider clients), `tradingagents/graph/`
+  (LangGraph orchestration, checkpointer, reflector, signal processor),
+  `tradingagents/agents/` (LangChain agent nodes and Pydantic schemas), `cli/`
+  (typer/rich interactive CLI), `main.py`, Docker files, and every
+  langchain/langgraph dependency. Python dependencies drop from ~20 to 6
+  (pandas, dateutil, dotenv, requests, stockstats, yfinance).
+- LLM-era configuration: providers, model names, temperature, effort knobs,
+  checkpointing (Claude Code sessions resume natively).
+
+### Changed
+
+- Research depth is a skill argument (`--depth shallow|medium|deep` → 1/3/5
+  debate and risk rounds); `TRADINGAGENTS_MAX_DEBATE_ROUNDS` /
+  `TRADINGAGENTS_MAX_RISK_ROUNDS` still override per-key.
+- Reflection generation moved from a dedicated LLM call into the orchestrating
+  skill (same 2–4-sentence contract, same log format).
+- The analyst phase runs in parallel (the agents were always
+  context-isolated; LangGraph merely ran them sequentially).
+
 ## [0.3.1] — 2026-07-05
 
 Correctness and stability patch: data look-ahead, graph-router crash-safety,

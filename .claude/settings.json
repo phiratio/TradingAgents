@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python -m tradingagents.data_cli:*)",
+      "Bash(.venv/bin/python -m pytest:*)"
+    ]
+  }
+}

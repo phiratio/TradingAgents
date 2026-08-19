@@ -1,9 +1,11 @@
-"""Reusable report-tree writer shared by the CLI and the programmatic API.
+"""Report-tree writer for completed pipeline runs.
 
 Writes a run's per-section markdown (analysts, research, trading, risk,
-portfolio) plus a consolidated ``complete_report.md`` under ``save_path``. The
-CLI and ``TradingAgentsGraph.save_reports`` both call this, so a headless / API
-run produces the same on-disk report tree a CLI run does.
+portfolio) plus a consolidated ``complete_report.md`` under ``save_path``.
+Called by the data CLI's ``report`` command (``python -m tradingagents.data_cli
+report <state.json> <out_dir>``), which the /tradingagents skill invokes at the
+end of every run; programmatic callers can use it directly with the same
+final-state dict shape.
 """
 
 from datetime import datetime

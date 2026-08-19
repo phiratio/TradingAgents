@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 
 import pytest
 
@@ -13,6 +14,9 @@ def _reload_with_env(monkeypatch, **overrides):
     """Set/clear env vars then reload default_config to re-evaluate DEFAULT_CONFIG."""
     for key in list(default_config_module._ENV_OVERRIDES):
         monkeypatch.delenv(key, raising=False)
+    for key in list(os.environ):
+        if key.startswith(default_config_module._VENDOR_ENV_PREFIX):
+            monkeypatch.delenv(key, raising=False)
     for key, val in overrides.items():
         monkeypatch.setenv(key, val)
     return importlib.reload(default_config_module)
@@ -20,28 +24,20 @@ def _reload_with_env(monkeypatch, **overrides):
 
 def test_no_env_uses_built_in_defaults(monkeypatch):
     dc = _reload_with_env(monkeypatch)
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "openai"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gpt-5.5"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gpt-5.4-mini"
-    assert dc.DEFAULT_CONFIG["backend_url"] is None
+    assert dc.DEFAULT_CONFIG["output_language"] == "English"
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
-    assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
+    assert dc.DEFAULT_CONFIG["max_risk_discuss_rounds"] == 1
+    assert dc.DEFAULT_CONFIG["benchmark_ticker"] is None
 
 
 def test_string_overrides(monkeypatch):
     dc = _reload_with_env(
         monkeypatch,
-        TRADINGAGENTS_LLM_PROVIDER="google",
-        TRADINGAGENTS_DEEP_THINK_LLM="gemini-3-pro-preview",
-        TRADINGAGENTS_QUICK_THINK_LLM="gemini-3-flash-preview",
-        TRADINGAGENTS_LLM_BACKEND_URL="https://example.invalid/v1",
         TRADINGAGENTS_OUTPUT_LANGUAGE="Chinese",
+        TRADINGAGENTS_BENCHMARK_TICKER="QQQ",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gemini-3-pro-preview"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gemini-3-flash-preview"
-    assert dc.DEFAULT_CONFIG["backend_url"] == "https://example.invalid/v1"
     assert dc.DEFAULT_CONFIG["output_language"] == "Chinese"
+    assert dc.DEFAULT_CONFIG["benchmark_ticker"] == "QQQ"
 
 
 def test_int_coercion(monkeypatch):
@@ -56,47 +52,14 @@ def test_int_coercion(monkeypatch):
     assert isinstance(dc.DEFAULT_CONFIG["max_risk_discuss_rounds"], int)
 
 
-@pytest.mark.parametrize(
-    "raw,expected",
-    [
-        ("true", True), ("True", True), ("1", True), ("yes", True), ("on", True),
-        ("false", False), ("False", False), ("0", False), ("no", False), ("off", False),
-    ],
-)
-def test_bool_coercion(monkeypatch, raw, expected):
-    dc = _reload_with_env(monkeypatch, TRADINGAGENTS_CHECKPOINT_ENABLED=raw)
-    assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is expected
-
-
-def test_reasoning_thinking_overrides(monkeypatch):
-    """The provider reasoning/thinking knobs are env-configurable (non-interactive runs)."""
-    dc = _reload_with_env(
-        monkeypatch,
-        TRADINGAGENTS_OPENAI_REASONING_EFFORT="high",
-        TRADINGAGENTS_GOOGLE_THINKING_LEVEL="minimal",
-        TRADINGAGENTS_ANTHROPIC_EFFORT="low",
-    )
-    assert dc.DEFAULT_CONFIG["openai_reasoning_effort"] == "high"
-    assert dc.DEFAULT_CONFIG["google_thinking_level"] == "minimal"
-    assert dc.DEFAULT_CONFIG["anthropic_effort"] == "low"
-
-
-def test_reasoning_effort_defaults_to_none(monkeypatch):
-    """Unset reasoning/thinking knobs stay None so each provider uses its own default."""
-    dc = _reload_with_env(monkeypatch)
-    assert dc.DEFAULT_CONFIG["openai_reasoning_effort"] is None
-    assert dc.DEFAULT_CONFIG["google_thinking_level"] is None
-    assert dc.DEFAULT_CONFIG["anthropic_effort"] is None
-
-
 def test_empty_env_value_is_passthrough(monkeypatch):
     """Empty TRADINGAGENTS_* values must not clobber the built-in default."""
     dc = _reload_with_env(
         monkeypatch,
-        TRADINGAGENTS_LLM_PROVIDER="",
+        TRADINGAGENTS_OUTPUT_LANGUAGE="",
         TRADINGAGENTS_MAX_DEBATE_ROUNDS="",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "openai"
+    assert dc.DEFAULT_CONFIG["output_language"] == "English"
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
 
 
@@ -110,16 +73,6 @@ def test_invalid_int_raises(monkeypatch):
     importlib.reload(default_config_module)
 
 
-@pytest.mark.parametrize("bad", ["treu", "flase", "maybe", "2", "enabled"])
-def test_invalid_bool_raises(monkeypatch, bad):
-    """A misspelled boolean must fail loudly (like ints) instead of silently False."""
-    monkeypatch.setenv("TRADINGAGENTS_CHECKPOINT_ENABLED", bad)
-    with pytest.raises(ValueError, match="TRADINGAGENTS_CHECKPOINT_ENABLED"):
-        importlib.reload(default_config_module)
-    monkeypatch.delenv("TRADINGAGENTS_CHECKPOINT_ENABLED", raising=False)
-    importlib.reload(default_config_module)
-
-
 def test_unknown_env_var_is_ignored(monkeypatch):
     """Env vars outside _ENV_OVERRIDES must not bleed into DEFAULT_CONFIG."""
     dc = _reload_with_env(
@@ -127,3 +80,28 @@ def test_unknown_env_var_is_ignored(monkeypatch):
         TRADINGAGENTS_NONEXISTENT_KEY="oops",
     )
     assert "nonexistent_key" not in dc.DEFAULT_CONFIG
+
+
+def test_vendor_env_override(monkeypatch):
+    """TRADINGAGENTS_VENDOR_<CATEGORY> selects the vendor chain for that category."""
+    dc = _reload_with_env(
+        monkeypatch,
+        TRADINGAGENTS_VENDOR_NEWS_DATA="alpha_vantage",
+        TRADINGAGENTS_VENDOR_CORE_STOCK_APIS="alpha_vantage,yfinance",
+    )
+    assert dc.DEFAULT_CONFIG["data_vendors"]["news_data"] == "alpha_vantage"
+    assert dc.DEFAULT_CONFIG["data_vendors"]["core_stock_apis"] == "alpha_vantage,yfinance"
+    # Untouched categories keep their built-in defaults.
+    assert dc.DEFAULT_CONFIG["data_vendors"]["fundamental_data"] == "yfinance"
+
+
+def test_vendor_env_unset_or_empty_keeps_default(monkeypatch):
+    """Unset/empty vendor env vars leave the built-in vendor chain in place."""
+    dc = _reload_with_env(monkeypatch, TRADINGAGENTS_VENDOR_NEWS_DATA="")
+    assert dc.DEFAULT_CONFIG["data_vendors"]["news_data"] == "yfinance"
+
+
+def test_vendor_env_unknown_category_is_ignored(monkeypatch):
+    """A vendor env var for a category that doesn't exist must not create one."""
+    dc = _reload_with_env(monkeypatch, TRADINGAGENTS_VENDOR_NOT_A_CATEGORY="yfinance")
+    assert "not_a_category" not in dc.DEFAULT_CONFIG["data_vendors"]

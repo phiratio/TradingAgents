@@ -1,11 +1,8 @@
-"""Report parity: the shared writer produces the report tree for the CLI and the
-programmatic API alike (#1037)."""
-
-from types import SimpleNamespace
+"""Report parity: the shared writer produces the report tree for every
+consumer of the reporting module (#1037)."""
 
 import pytest
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import write_report_tree
 
 
@@ -31,20 +28,3 @@ def test_write_report_tree_creates_files(tmp_path):
     complete = out.read_text()
     assert "Trading Analysis Report: AAPL" in complete
     assert "MKT" in complete and "PM DECISION" in complete
-
-
-@pytest.mark.unit
-def test_save_reports_explicit_path(tmp_path):
-    # Unbound: with an explicit save_path, the method doesn't touch self/config.
-    out = TradingAgentsGraph.save_reports(None, _state(), "AAPL", save_path=tmp_path)
-    assert (tmp_path / "complete_report.md").exists()
-    assert out == tmp_path / "complete_report.md"
-
-
-@pytest.mark.unit
-def test_save_reports_defaults_under_results_dir(tmp_path):
-    mock_self = SimpleNamespace(config={"results_dir": str(tmp_path)})
-    out = TradingAgentsGraph.save_reports(mock_self, _state(), "AAPL")
-    assert out.exists()
-    assert out.parent.parent.name == "reports"  # results_dir/reports/AAPL_<stamp>/...
-    assert out.parent.name.startswith("AAPL_")
