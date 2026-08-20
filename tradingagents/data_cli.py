@@ -208,7 +208,7 @@ Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish /
 <end_of_stocktwits>
 
 ### Reddit posts — r/wallstreetbets, r/stocks, r/investing (past 7 days)
-Community discussion. Engagement signal via upvote score and comment count. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
+Community discussion. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term). Upvote scores and comment counts are omitted when posts arrive via the RSS feed (the usual case) — weight by content and recurrence then, and never invent engagement numbers.
 
 <start_of_reddit>
 {reddit_block}

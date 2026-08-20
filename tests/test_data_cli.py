@@ -6,6 +6,7 @@ captured stdout/stderr — with ``route_to_vendor`` stubbed out. No network.
 """
 
 import json
+import os
 
 import pytest
 
@@ -145,6 +146,37 @@ class TestRoutedCommands:
             ("get_macro_indicators", ("vix", "2024-06-03", None), {}),
         ]
 
+    def test_global_news_omits_unset_flags(self, stub_vendor, capsys):
+        # No flags → NO kwargs forwarded: an explicit None would clobber
+        # vendor-side defaults that are not None-safe (alpha_vantage's 7/50).
+        stub = stub_vendor(lambda *a, **k: "macro headlines")
+
+        rc = main(["global-news", "2024-06-03"])
+
+        assert rc == 0
+        assert stub.calls == [("get_global_news", ("2024-06-03",), {})]
+        assert capsys.readouterr().out == "macro headlines\n"
+
+    def test_global_news_forwards_set_flags_as_kwargs(self, stub_vendor):
+        stub = stub_vendor()
+
+        rc = main([
+            "global-news", "2024-06-03", "--look-back-days", "14", "--limit", "25",
+        ])
+
+        assert rc == 0
+        assert stub.calls == [
+            ("get_global_news", ("2024-06-03",), {"look_back_days": 14, "limit": 25}),
+        ]
+
+    def test_global_news_forwards_only_the_flag_given(self, stub_vendor):
+        stub = stub_vendor()
+
+        rc = main(["global-news", "2024-06-03", "--limit", "5"])
+
+        assert rc == 0
+        assert stub.calls == [("get_global_news", ("2024-06-03",), {"limit": 5})]
+
 
 # ---------------------------------------------------------------------------
 # Vendor error contract
@@ -224,12 +256,16 @@ class TestMemoryRoundTrip:
         assert f"DECISION:\n{self.DECISION}" in content
         assert "<!-- ENTRY_END -->" in content
 
-        # --- duplicate store is idempotent: file byte-identical ---
+        # --- duplicate store is idempotent: file byte-identical, and the
+        # CLI says so instead of claiming a second entry was stored ---
         rc = main([
             "memory", "store", "AAPL", "2024-05-01", "--decision", self.DECISION,
         ])
         assert rc == 0
-        capsys.readouterr()
+        dup_out = capsys.readouterr().out
+        assert "Not stored:" in dup_out
+        assert "already exists" in dup_out
+        assert "Stored pending decision" not in dup_out
         assert memory_log_path.read_text(encoding="utf-8") == content
         assert content.count("[2024-05-01 | AAPL |") == 1
 
@@ -264,6 +300,65 @@ class TestMemoryRoundTrip:
         assert rc == 2
         assert "CONFIG ERROR" in capsys.readouterr().err
         assert not memory_log_path.exists()
+
+    def test_store_when_logging_disabled_prints_not_stored(
+        self, memory_log_path, monkeypatch, capsys
+    ):
+        # memory_log_path unset in config → store_decision returns False and
+        # the CLI must not claim the decision was stored.
+        monkeypatch.setattr(
+            data_cli, "get_config",
+            lambda: {"memory_log_path": None, "memory_log_max_entries": None},
+        )
+        rc = main([
+            "memory", "store", "AAPL", "2024-05-01", "--decision", self.DECISION,
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Not stored:" in out
+        assert "disabled" in out
+        assert not memory_log_path.exists()
+
+    def test_resolve_missing_entry_exits_2(self, memory_log_path, capsys):
+        # Nothing was ever stored → resolve must fail loudly, not print a
+        # bogus "Resolved ..." success line.
+        rc = main([
+            "memory", "resolve", "AAPL", "2024-05-01",
+            "--raw", "0.042", "--alpha", "0.021", "--days", "5",
+            "--reflection", self.REFLECTION,
+        ])
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "CONFIG ERROR" in captured.err
+        assert "no pending memory entry" in captured.err
+        assert "AAPL" in captured.err
+        assert "2024-05-01" in captured.err
+
+    def test_resolve_twice_second_attempt_exits_2(self, memory_log_path, capsys):
+        # Once resolved, the entry is no longer pending: a second resolve for
+        # the same (ticker, date) is a config error, not a silent success.
+        rc = main([
+            "memory", "store", "AAPL", "2024-05-01", "--decision", self.DECISION,
+        ])
+        assert rc == 0
+        rc = main([
+            "memory", "resolve", "AAPL", "2024-05-01",
+            "--raw", "0.042", "--alpha", "0.021", "--days", "5",
+            "--reflection", self.REFLECTION,
+        ])
+        assert rc == 0
+        capsys.readouterr()
+
+        rc = main([
+            "memory", "resolve", "AAPL", "2024-05-01",
+            "--raw", "0.042", "--alpha", "0.021", "--days", "5",
+            "--reflection", self.REFLECTION,
+        ])
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "Resolved" not in captured.out
+        assert "no pending memory entry" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -317,3 +412,33 @@ class TestConfig:
         parsed = json.loads(capsys.readouterr().out)
         assert "data_vendors" in parsed
         assert isinstance(parsed["data_vendors"], dict)
+
+    def test_config_env_overrides_lists_set_tradingagents_vars(self, monkeypatch, capsys):
+        # Provenance for the orchestrator: names of set TRADINGAGENTS_* env
+        # vars, sorted; empty values and foreign prefixes excluded.
+        monkeypatch.setenv("TRADINGAGENTS_OUTPUT_LANGUAGE", "Chinese")
+        monkeypatch.setenv("TRADINGAGENTS_MAX_DEBATE_ROUNDS", "2")
+        monkeypatch.setenv("TRADINGAGENTS_EMPTY_VALUE", "")
+        monkeypatch.setenv("NOT_TRADINGAGENTS_VAR", "x")
+
+        rc = main(["config"])
+
+        assert rc == 0
+        parsed = json.loads(capsys.readouterr().out)
+        overrides = parsed["env_overrides"]
+        assert "TRADINGAGENTS_OUTPUT_LANGUAGE" in overrides
+        assert "TRADINGAGENTS_MAX_DEBATE_ROUNDS" in overrides
+        assert "TRADINGAGENTS_EMPTY_VALUE" not in overrides
+        assert "NOT_TRADINGAGENTS_VAR" not in overrides
+        assert overrides == sorted(overrides)
+
+    def test_config_env_overrides_empty_when_none_set(self, monkeypatch, capsys):
+        for key in list(os.environ):
+            if key.startswith("TRADINGAGENTS_"):
+                monkeypatch.delenv(key)
+
+        rc = main(["config"])
+
+        assert rc == 0
+        parsed = json.loads(capsys.readouterr().out)
+        assert parsed["env_overrides"] == []

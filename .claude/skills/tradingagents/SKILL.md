@@ -295,8 +295,11 @@ Never place, offer to place, or simulate placing an order.
 - Data commands degrade to readable text (`NO_DATA_AVAILABLE`, `<stocktwits
   unavailable: ...>`); pass them to agents as-is — they are instructed not to
   fabricate around gaps.
-- `CONFIG ERROR` on stderr (exit 2) means a configured vendor lacks its API
-  key (`FRED_API_KEY`, `ALPHA_VANTAGE_API_KEY`). Tell the user which env var
-  to set; the pipeline continues without that data source.
+- `CONFIG ERROR` on stderr (exit 2) means the command could not do what was
+  asked — read the message. For a core data category it names a missing vendor
+  API key (`ALPHA_VANTAGE_API_KEY`); tell the user which env var to set and
+  continue without that source. For `memory resolve` it means no matching
+  pending entry existed. Optional sources never exit 2: a missing
+  `FRED_API_KEY` degrades to a `DATA_UNAVAILABLE:` sentinel with exit 0.
 - If a subagent fails, retry it once with the same prompt before surfacing
   the failure.

@@ -104,6 +104,28 @@ class TestTradingMemoryLogCore:
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         assert len(log.load_entries()) == 1
 
+    def test_store_decision_returns_true_then_false_on_duplicate(self, tmp_path):
+        """Return value tells the caller whether an entry was actually written."""
+        log = make_log(tmp_path)
+        assert log.store_decision("NVDA", "2026-01-10", DECISION_BUY) is True
+        assert log.store_decision("NVDA", "2026-01-10", DECISION_BUY) is False
+        # Different date or ticker is not a duplicate.
+        assert log.store_decision("NVDA", "2026-01-11", DECISION_BUY) is True
+        assert log.store_decision("AAPL", "2026-01-10", DECISION_BUY) is True
+
+    def test_store_decision_returns_false_when_disabled(self):
+        log = TradingMemoryLog(config=None)
+        assert log.store_decision("NVDA", "2026-01-10", DECISION_BUY) is False
+
+    def test_store_decision_allows_new_pending_after_resolution(self, tmp_path):
+        """The duplicate guard matches PENDING entries only: once resolved,
+        the same (ticker, date) may be analyzed again."""
+        log = make_log(tmp_path)
+        log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
+        log.update_with_outcome("NVDA", "2026-01-10", 0.05, 0.02, 5, "Correct.")
+        assert log.store_decision("NVDA", "2026-01-10", DECISION_BUY) is True
+        assert len(log.load_entries()) == 2
+
     def test_pending_tag_format(self, tmp_path):
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
@@ -185,7 +207,7 @@ class TestTradingMemoryLogCore:
 
     def test_update_noop_when_no_log_path(self):
         log = TradingMemoryLog(config=None)
-        log.update_with_outcome("NVDA", "2026-01-10", 0.05, 0.02, 5, "Reflection")
+        assert log.update_with_outcome("NVDA", "2026-01-10", 0.05, 0.02, 5, "Reflection") is False
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +329,41 @@ class TestGetPastContext:
 
 class TestOutcomeUpdates:
 
+    def test_update_returns_true_on_success(self, tmp_path):
+        log = make_log(tmp_path)
+        log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
+        assert log.update_with_outcome(
+            "NVDA", "2026-01-10", 0.042, 0.021, 5, "Momentum confirmed."
+        ) is True
+
+    def test_update_returns_false_when_no_matching_pending(self, tmp_path):
+        """Wrong date or ticker → False, and the pending entry stays untouched."""
+        log = make_log(tmp_path)
+        log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
+        assert log.update_with_outcome("NVDA", "2026-01-11", 0.042, 0.021, 5, "x") is False
+        assert log.update_with_outcome("AAPL", "2026-01-10", 0.042, 0.021, 5, "x") is False
+        entries = log.load_entries()
+        assert len(entries) == 1
+        assert entries[0]["pending"] is True
+        assert entries[0]["reflection"] == ""
+
+    def test_update_returns_false_when_already_resolved(self, tmp_path):
+        """A second resolve of the same (ticker, date) finds no pending entry."""
+        log = make_log(tmp_path)
+        log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
+        assert log.update_with_outcome("NVDA", "2026-01-10", 0.042, 0.021, 5, "First.") is True
+        assert log.update_with_outcome("NVDA", "2026-01-10", 0.099, 0.088, 9, "Second.") is False
+        entries = log.load_entries()
+        assert len(entries) == 1
+        assert entries[0]["reflection"] == "First."
+        assert entries[0]["raw"] == "+4.2%"
+
+    def test_update_returns_false_when_file_missing(self, tmp_path):
+        """No log file on disk yet → False, no crash, no file created."""
+        log = make_log(tmp_path)
+        assert log.update_with_outcome("NVDA", "2026-01-10", 0.05, 0.02, 5, "x") is False
+        assert not (tmp_path / "trading_memory.md").exists()
+
     def test_update_replaces_pending_tag(self, tmp_path):
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
@@ -387,13 +444,53 @@ class TestOutcomeUpdates:
              "raw_return": -0.03, "alpha_return": -0.01, "holding_days": 5,
              "reflection": "Second correct."},
         ]
-        log.batch_update_with_outcomes(updates)
+        assert log.batch_update_with_outcomes(updates) == 2
 
         entries = log.load_entries()
         assert len(entries) == 2
         assert all(not e["pending"] for e in entries)
         assert entries[0]["reflection"] == "First correct."
         assert entries[1]["reflection"] == "Second correct."
+
+    def test_batch_update_returns_count_of_matches_only(self, tmp_path):
+        """Non-matching updates are skipped and excluded from the applied count."""
+        log = make_log(tmp_path)
+        log.store_decision("NVDA", "2026-01-05", DECISION_BUY)
+
+        updates = [
+            {"ticker": "NVDA", "trade_date": "2026-01-05",
+             "raw_return": 0.05, "alpha_return": 0.02, "holding_days": 5,
+             "reflection": "Matched."},
+            {"ticker": "AAPL", "trade_date": "2026-01-05",  # never stored
+             "raw_return": 0.01, "alpha_return": 0.0, "holding_days": 5,
+             "reflection": "Unmatched."},
+        ]
+        assert log.batch_update_with_outcomes(updates) == 1
+        entries = log.load_entries()
+        assert len(entries) == 1
+        assert entries[0]["ticker"] == "NVDA"
+        assert entries[0]["pending"] is False
+        assert entries[0]["reflection"] == "Matched."
+
+    def test_batch_update_returns_zero_when_disabled_or_file_missing(self, tmp_path):
+        """Logging disabled or no log file on disk → 0, no crash, no file created."""
+        update = {
+            "ticker": "NVDA", "trade_date": "2026-01-05",
+            "raw_return": 0.05, "alpha_return": 0.02, "holding_days": 5,
+            "reflection": "x",
+        }
+        assert TradingMemoryLog(config=None).batch_update_with_outcomes([update]) == 0
+        log = make_log(tmp_path)  # path configured, but nothing stored yet
+        assert log.batch_update_with_outcomes([update]) == 0
+        assert not (tmp_path / "trading_memory.md").exists()
+
+    def test_batch_update_empty_list_returns_zero_and_leaves_log_untouched(self, tmp_path):
+        log = make_log(tmp_path)
+        log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
+        before = (tmp_path / "trading_memory.md").read_text(encoding="utf-8")
+        assert log.batch_update_with_outcomes([]) == 0
+        assert (tmp_path / "trading_memory.md").read_text(encoding="utf-8") == before
+        assert log.load_entries()[0]["pending"] is True
 
     # Rotation: opt-in cap on resolved entries
 

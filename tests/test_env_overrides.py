@@ -105,3 +105,27 @@ def test_vendor_env_unknown_category_is_ignored(monkeypatch):
     """A vendor env var for a category that doesn't exist must not create one."""
     dc = _reload_with_env(monkeypatch, TRADINGAGENTS_VENDOR_NOT_A_CATEGORY="yfinance")
     assert "not_a_category" not in dc.DEFAULT_CONFIG["data_vendors"]
+
+
+_PATH_ENV_VARS = (
+    ("TRADINGAGENTS_RESULTS_DIR", "results_dir", "~/ta-env-test/results"),
+    ("TRADINGAGENTS_CACHE_DIR", "data_cache_dir", "~/ta-env-test/cache"),
+    ("TRADINGAGENTS_MEMORY_LOG_PATH", "memory_log_path", "~/ta-env-test/memory.md"),
+)
+
+
+def test_path_env_vars_expand_tilde(monkeypatch):
+    """~-prefixed path values are expanded — dotenv loads .env values literally,
+    so a plain string like '~/logs' must not become a literal './~/logs' dir."""
+    for env_var, _, value in _PATH_ENV_VARS:
+        monkeypatch.setenv(env_var, value)
+    dc = importlib.reload(default_config_module)
+    for env_var, key, value in _PATH_ENV_VARS:
+        expected = os.path.expanduser(value)
+        assert dc.DEFAULT_CONFIG[key] == expected, env_var
+        assert not dc.DEFAULT_CONFIG[key].startswith("~")
+        assert os.path.isabs(dc.DEFAULT_CONFIG[key])
+    # Restore module state for subsequent tests in this process
+    for env_var, _, _ in _PATH_ENV_VARS:
+        monkeypatch.delenv(env_var, raising=False)
+    importlib.reload(default_config_module)
