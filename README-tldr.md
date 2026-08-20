@@ -4,15 +4,20 @@ Multi-agent trading research inside Claude Code. No LLM API keys.
 
 ## Setup (once)
 
+Requires Python **3.10+** and [Claude Code](https://claude.com/claude-code).
+Check first — `python3 --version` — and if it prints 3.9 or older (common with
+pyenv/macOS defaults), use a versioned interpreter like `python3.12` below.
+
 ```bash
 git clone https://github.com/phiratio/TradingAgents.git
 cd TradingAgents
-python3 -m venv .venv
+python3.12 -m venv .venv   # or python3 if it is 3.10+
 .venv/bin/pip install -e .
 ```
 
-Requires Python 3.10+ (`python3.12 -m venv .venv` if your default is older) and
-[Claude Code](https://claude.com/claude-code).
+The venv must be named `.venv` in the repo root — the /tradingagents skill and
+the pre-approved permissions in `.claude/settings.json` invoke
+`.venv/bin/python`.
 
 ## Run
 

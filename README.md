@@ -17,7 +17,7 @@
 
 ```bash
 git clone <this repo> && cd tradingagents
-python3 -m venv .venv && .venv/bin/pip install -e .
+python3 -m venv .venv && .venv/bin/pip install -e .   # needs Python 3.10+: use e.g. python3.12 if python3 is older
 claude
 ```
 
