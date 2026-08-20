@@ -74,6 +74,7 @@ structured debate.
 Inside Claude Code, in this repository:
 
 ```
+/tradingagents                            # interactive: pick ticker, date, analysts, depth
 /tradingagents NVDA                       # analyze NVDA as of today
 /tradingagents 0700.HK 2026-08-15        # historical analysis date
 /tradingagents BTC-USD --depth medium     # deeper debate (1/3/5 rounds)

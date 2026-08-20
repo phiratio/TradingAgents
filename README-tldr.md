@@ -30,6 +30,7 @@ claude
 Then:
 
 ```
+/tradingagents                             # interactive: pick ticker, date, analysts, depth
 /tradingagents NVDA                        # analyze a ticker as of today
 /tradingagents 0700.HK 2026-08-15          # historical analysis date
 /tradingagents BTC-USD --depth medium      # deeper debate (shallow|medium|deep = 1|3|5 rounds)

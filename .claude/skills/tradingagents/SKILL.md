@@ -1,6 +1,6 @@
 ---
 name: tradingagents
-description: Run the TradingAgents multi-agent trading analysis for a ticker — parallel analysts, bull/bear research debate, trader proposal, risk debate, and a final Portfolio Manager rating. Use when the user asks to analyze a stock, crypto, or ticker, run TradingAgents, or wants a Buy/Sell/Hold-style research report. Arguments: TICKER [DATE] [--depth shallow|medium|deep] [--analysts market,social,news,fundamentals]
+description: Run the TradingAgents multi-agent trading analysis for a ticker — parallel analysts, bull/bear research debate, trader proposal, risk debate, and a final Portfolio Manager rating. Use when the user asks to analyze a stock, crypto, or ticker, run TradingAgents, or wants a Buy/Sell/Hold-style research report. Arguments: [TICKER] [DATE] [--depth shallow|medium|deep] [--analysts market,social,news,fundamentals] [--interactive]; with no ticker, an interactive setup asks the user to pick ticker, date, analysts, and depth before running.
 ---
 
 # TradingAgents pipeline orchestration
@@ -29,18 +29,60 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 
 (Use `python3.12`/`python3.13` explicitly if `python3` is older than 3.10.)
 
-## 1. Arguments
+## 1. Arguments and interactive setup
 
-From the skill invocation (`/tradingagents TICKER [DATE] [flags]`):
+Invocation: `/tradingagents [TICKER] [DATE] [flags]`.
 
-- **TICKER** — default `SPY` if omitted. Valid chars: alphanumerics plus `._-^=`, max 32.
+### Interactive mode
+
+Enter interactive mode when the invocation names NO ticker (bare
+`/tradingagents`, or a plain-language request without a symbol), or when
+`--interactive`/`-i` is passed. Run `$DATA config` first (you need
+`env_overrides` and `output_language`), then collect the run setup with the
+AskUserQuestion tool BEFORE any other work. Questions in this order, applying
+the env-skip rule of the original CLI — a setting pinned via env var is not
+asked, and the recap line notes it as "from environment":
+
+1. **Ticker** (always) — offer "SPY — S&P 500 ETF (Recommended)" plus a few
+   liquid names (e.g. NVDA, AAPL, BTC-USD); any other symbol arrives via the
+   built-in Other option. Mention in the question that exchange suffixes
+   (`0700.HK`, `AZN.L`) and crypto pairs (`BTC-USD`) are supported.
+2. **Date** (always) — "Today (Recommended)" | "Previous trading day" |
+   custom `YYYY-MM-DD` via Other. Reject future dates.
+3. **Analysts** (always, multiSelect) — Market, Sentiment, News, Fundamentals;
+   recommend all four. If the ticker later resolves as crypto, drop
+   Fundamentals and tell the user why.
+4. **Research depth** (skip when BOTH `TRADINGAGENTS_MAX_DEBATE_ROUNDS` and
+   `TRADINGAGENTS_MAX_RISK_ROUNDS` appear in `env_overrides`) —
+   "Shallow — quick, 1 debate round (Recommended)" | "Medium — 3 rounds" |
+   "Deep — comprehensive, 5 rounds".
+5. **Output language** (skip when `TRADINGAGENTS_OUTPUT_LANGUAGE` appears in
+   `env_overrides`) — "English (Recommended)" plus a few common languages;
+   any language via Other. A non-English choice acts as the run's
+   `output_language` for the language rule in step 2.
+
+One AskUserQuestion call holds at most 4 questions: ask the first four
+together and any remainder (usually just language) in a second call — or fold
+language into the first call when a skip freed a slot. After the answers,
+print a one-line recap (ticker, date, analysts, rounds, language) and proceed
+straight into the run — no extra confirmation round.
+
+In a context where no user can answer (headless or scheduled runs), never
+block on questions — use the defaults below.
+
+### Direct mode
+
+A ticker in the invocation skips all questions; flags fill the rest:
+
+- **TICKER** — valid chars: alphanumerics plus `._-^=`, max 32. (Default `SPY`
+  when a headless run reaches here without one.)
 - **DATE** — `YYYY-MM-DD`, default today. Reject future dates.
 - **--depth** — `shallow` (default) | `medium` | `deep` → sets BOTH debate-round
   values to 1 | 3 | 5, unless `TRADINGAGENTS_MAX_DEBATE_ROUNDS` /
   `TRADINGAGENTS_MAX_RISK_ROUNDS` are pinned in the environment (those win
   per-key). Detect pins via the `env_overrides` list in the `config` output —
   not by comparing values, which cannot distinguish "pinned to the default"
-  from "unset".
+  from "unset". The same pin rule applies to the interactive depth answer.
 - **--analysts** — comma list from `market,social,news,fundamentals`; default all
   four. (`social` is the sentiment analyst — the wire name is historical.)
 
@@ -50,6 +92,10 @@ From the skill invocation (`/tradingagents TICKER [DATE] [flags]`):
 $DATA identity TICKER
 $DATA config
 ```
+
+(In interactive mode `config` already ran during the questionnaire — reuse its
+output. An interactively chosen output language overrides the config value for
+this run.)
 
 From `identity`: `canonical` (use it as THE ticker from here on), `asset_type`,
 `instrument_context`, `benchmark`. If `asset_type` is `crypto`, drop the
